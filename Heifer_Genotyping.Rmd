@@ -1,0 +1,70 @@
+---
+title: "Heifer Genotyping Analysis"
+author: "Troy Rowan"
+date: "5/5/2021"
+output: html_document
+---
+
+```{r setup, include<-FALSE}
+knitr::opts_chunk$set(echo <- TRUE)
+library(tidyverse)
+```
+
+
+```{r}
+intensity <- function(prop){
+  dnorm(qnorm(1-prop))/prop
+}
+
+reduction <- function(prop){
+  qnorm(prop, lower.tail = FALSE)
+}
+
+#Here i is the intensity of selection
+#x is the deviation of the truncation point from the population mean
+kcalc <- function(prop){
+  i <- intensity(prop)
+  x <- reduction(prop)
+  k <- i*(i-prop)
+  return(k)
+}
+
+#BIF-accuracy <- 1.0 – SQRT[1.0 – acc2]q
+bif_to_rel <- function(BIF_acc){
+  reliability <- 1-(1-BIF_acc)^2
+  return(reliability)
+}
+
+superiority_calc <- function(prop_f, prop_m, BIF_g, BIF_pa, BIF_sire, BIF_dam){
+  reliability_g <- bif_to_rel(BIF_g)
+  reliability_pa <- bif_to_rel(BIF_pa)
+  reliability_sire <- bif_to_rel(BIF_sire)
+  reliability_dam <- bif_to_rel(BIF_dam)
+  k_av <- mean(kcalc(prop_f), kcalc(prop_m))
+  superiority <- intensity(prop_f) * (sqrt(reliability_g) - sqrt(reliability_pa)) * sqrt((1 + k_av * (1-mean(reliability_sire, reliability_dam)))/(1 + k_av))
+  return(superiority)
+}
+
+net_benefit <- function(productive_life, age_first_calf, calf_superiority, discount_rate, test_cost, replacements_kept){
+  cycle <- seq(age_first_calf + 1, productive_life + age_first_calf, 1)
+  
+  net_benefit <- sum((calf_superiority/((1 + discount_rate)^cycle))-(test_cost/replacements_kept)) 
+  return(net_benefit)
+}
+
+
+gcost <- function(productive_life, age_first_calf, calf_superiority, discount_rate, prop){
+  cycle <- seq(age_first_calf + 1, productive_life + age_first_calf, 1)
+  breakeven <- sum(calf_superiority/((1 + discount_rate)^cycle)) * prop 
+  return(breakeven)
+}
+```
+
+
+```{r }
+superiority_calc(prop_f = 0.5, prop_m = 0.5, BIF_g = 0.30, BIF_pa = 0.15, BIF_sire = 0.7, BIF_dam = 0.2)
+net_benefit(productive_life = 4, age_first_calf = 2, calf_superiority = 0.1358, discount_rate = 0.08, test_cost = 0.32, replacements_kept = 25)
+
+```
+
+Note that the `echo <- FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
