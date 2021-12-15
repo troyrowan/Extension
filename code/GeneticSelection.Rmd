@@ -1,0 +1,29 @@
+---
+title: "Genetic Selection Simulations"
+author: "Troy Rowan"
+date: "9/21/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(AlphaSimR)
+library(tidyverse)
+```
+
+### Creating Founder Population
+```{r}
+# founderPop = runMacs(nInd=2000,
+#                      nChr=10,
+#                      segSites=5000,
+#                      species = "CATTLE")
+#saveRDS(founderPop, "founderpop_2000_10_5000.RDS")
+founderPop = readRDS("founderpop.RDS")
+
+SP = SimParam$new(founderPop)
+SP$addTraitA(nQtlPerChr=1000)
+SP$setSexes("yes_sys")
+SP$addSnpChip(nSnpPerChr = 1000)
+SP$setVarE(h2 = 0.4)
+```
+

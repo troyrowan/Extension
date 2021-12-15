@@ -1,0 +1,104 @@
+---
+title: "Heifer Genotyping Simulations"
+author: "Troy Rowan"
+date: "8/23/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(AlphaSimR)
+```
+## Notes from 08/23/2021 eBeef Meeting
+* Using the appraoch in Newton/Berry likely won't cut it
+* Their assumption that the alternative to commercial genomic testing is using a parental average index doesnt' apply to US beef populations
+* In reality our commercial selection is all over the palce on the female side
+    + Bull selection may, however be using GE-EPDs
+* Dam selection can be simulated in four ways:
+    + Random selection
+    + Phenotypic selection
+    + Index from a genetic prediction (no genomics)
+    + Genomic prediction
+* Can we grab accuracies from Angus recalibration update?
+* Simulate accuracy by adding random noise to True values to achieve desired reliability
+    + Can we just simulate phenotypic selection on traits with different heritabilities?
+
+Questions:
+* Do we need to simulate a full dataset first, then use each method to  
+
+#Simulating a founder population for a trait with h2 = 0.25
+```{r}
+# founderPop = runMacs(nInd=1000,
+#                      nChr=10,
+#                      segSites=5000,
+#                      species = "CATTLE")
+#saveRDS(founderPop, "../data/founderpop.RDS")
+
+BigFounderPop = runMacs(nInd=2000,
+                     nChr=30,
+                     segSites=10000,
+                     species = "CATTLE")
+saveRDS(founderPop, "../data/founderpop.RDS")
+
+founderPop = readRDS("../data/founderpop.RDS")
+
+SP = SimParam$new(founderPop)
+SP$addTraitA(nQtlPerChr=1000)
+SP$setSexes("yes_sys")
+SP$addSnpChip(nSnpPerChr = 500)
+SP$setVarE(h2 = 0.25)
+
+```
+
+## Simulating 10 generations of selection:
+```{r}
+pheno_pop = gv_pop = rand_pop = ebv_pop = newPop(founderPop)
+
+generations = data.frame(animal = NULL, population = NULL, generation = NULL, BV = NULL, sex = NULL)
+#gv_pop = selectCross(pop=gv_pop, nFemale=500, nMale=20, use="gv", nCrosses = 500)
+n_crosses = 1000
+
+for(generation in 1:10){
+    ans = RRBLUP(ebv_pop, simParam=SP)
+    ebv_pop = setEBV(ebv_pop, ans, simParam=SP)
+    gv_pop = selectCross(pop=gv_pop, nFemale=150, nMale=20, use="gv", nCrosses = n_crosses) #performs breeding for genetic value selection
+    pheno_pop = selectCross(pop=pheno_pop, nFemale=150, nMale=20, use="pheno", nCrosses = n_crosses) #performs breeding for phenotypic selection
+    rand_pop = selectCross(pop=rand_pop, nFemale=150, nMale=20, use="rand", nCrosses = n_crosses)
+    ebv_pop = selectCross(pop=ebv_pop, nFemale=150, nMale=20, use="ebv", nCrosses = n_crosses)#performs breeding for random selection
+    update = data.frame(animal = seq(1, n_crosses), 
+                                     population = c(rep("gv_pop", n_crosses),
+                                                    rep("pheno_pop", n_crosses),
+                                                    rep("rand_pop", n_crosses),
+                                                    rep("ebv_pop", n_crosses)), 
+                                     generation = c(rep(generation, n_crosses),
+                                                    rep(generation, n_crosses),
+                                                    rep(generation, n_crosses),
+                                                    rep(generation, n_crosses)),
+                                     BV = c(gv_pop@gv, pheno_pop@gv, rand_pop@gv, ebv_pop@gv),
+                        Phenotype = c(gv_pop@pheno, pheno_pop@pheno, rand_pop@pheno, ebv_pop@gv)
+                                       
+                        ) 
+    generations = bind_rows(generations, update)
+    }
+
+generations %>%
+    ggplot(aes(generation, BV, color = population))+
+    geom_smooth()
+
+```
+
+## Selecting bulls with EBVs, females via phenotypic selection
+```{r}
+pop = newPop(founderPop)
+
+ans = RRBLUP(pop, simParam=SP)
+pop = setEBV(pop, ans, simParam=SP)
+
+females = selectInd(pop = pop, nInd = 150, sex = "F", use = "pheno")
+males = selectInd(pop, nInd = 150)
+
+makeCross()
+
+```
+
