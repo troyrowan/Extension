@@ -7,13 +7,23 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-library(tidyverse)
 library(AlphaSimR)
+library(tidyverse)
+
+r_to_bif <- function(correlation){
+  bif = 1-sqrt((1-correlation^2))
+  return(bif)
+}
+
+bif_to_r <- function(bif){
+  r = sqrt(1-(1-bif)^2)
+  return(r)
+}
 ```
 ## Notes from 08/23/2021 eBeef Meeting
-* Using the appraoch in Newton/Berry likely won't cut it
+* Using the approach in Newton/Berry likely won't cut it
 * Their assumption that the alternative to commercial genomic testing is using a parental average index doesnt' apply to US beef populations
-* In reality our commercial selection is all over the palce on the female side
+* In reality our commercial selection is all over the place on the female side
     + Bull selection may, however be using GE-EPDs
 * Dam selection can be simulated in four ways:
     + Random selection
@@ -29,54 +39,56 @@ Questions:
 
 #Simulating a founder population for a trait with h2 = 0.25
 ```{r}
-# founderPop = runMacs(nInd=1000,
-#                      nChr=10,
-#                      segSites=5000,
-#                      species = "CATTLE")
+founderPop = runMacs(nInd=100,
+                      nChr=10,
+                      segSites=500,
+                      species = "CATTLE")
 #saveRDS(founderPop, "../data/founderpop.RDS")
 
-BigFounderPop = runMacs(nInd=2000,
-                     nChr=30,
-                     segSites=10000,
-                     species = "CATTLE")
-saveRDS(founderPop, "../data/founderpop.RDS")
+# BigFounderPop = runMacs(nInd=2000,
+#                      nChr=30,
+#                      segSites=10000,
+#                      species = "CATTLE")
+# saveRDS(founderPop, "../data/founderpop.RDS")
 
-founderPop = readRDS("../data/founderpop.RDS")
+#founderPop = readRDS("../data/founderpop.RDS")
 
 SP = SimParam$new(founderPop)
-SP$addTraitA(nQtlPerChr=1000)
+SP$addTraitA(nQtlPerChr=10)
 SP$setSexes("yes_sys")
-SP$addSnpChip(nSnpPerChr = 500)
-SP$setVarE(h2 = 0.25)
-
+SP$addSnpChip(nSnpPerChr = 100)
+SP$addTraitA(nQtlPerChr=rep(10,10))
+SP$setVarE(h2 = 0.3)
+pheno_pop = ebv_pop = newPop(founderPop)
 ```
 
 ## Simulating 10 generations of selection:
 ```{r}
-pheno_pop = gv_pop = rand_pop = ebv_pop = newPop(founderPop)
-
+gv_pop = rand_pop = ebv_pop = newPop(founderPop)
+#This alllows us to track performance over subsequent generations
 generations = data.frame(animal = NULL, population = NULL, generation = NULL, BV = NULL, sex = NULL)
 #gv_pop = selectCross(pop=gv_pop, nFemale=500, nMale=20, use="gv", nCrosses = 500)
 n_crosses = 1000
 
+#This is the selection process that occurs each generation
 for(generation in 1:10){
     ans = RRBLUP(ebv_pop, simParam=SP)
     ebv_pop = setEBV(ebv_pop, ans, simParam=SP)
     gv_pop = selectCross(pop=gv_pop, nFemale=150, nMale=20, use="gv", nCrosses = n_crosses) #performs breeding for genetic value selection
-    pheno_pop = selectCross(pop=pheno_pop, nFemale=150, nMale=20, use="pheno", nCrosses = n_crosses) #performs breeding for phenotypic selection
+    #pheno_pop = selectCross(pop=pheno_pop, nFemale=150, nMale=20, use="pheno", nCrosses = n_crosses) #performs breeding for phenotypic selection
     rand_pop = selectCross(pop=rand_pop, nFemale=150, nMale=20, use="rand", nCrosses = n_crosses)
     ebv_pop = selectCross(pop=ebv_pop, nFemale=150, nMale=20, use="ebv", nCrosses = n_crosses)#performs breeding for random selection
     update = data.frame(animal = seq(1, n_crosses), 
                                      population = c(rep("gv_pop", n_crosses),
-                                                    rep("pheno_pop", n_crosses),
+                                                    #rep("pheno_pop", n_crosses),
                                                     rep("rand_pop", n_crosses),
                                                     rep("ebv_pop", n_crosses)), 
                                      generation = c(rep(generation, n_crosses),
-                                                    rep(generation, n_crosses),
+                                                    #rep(generation, n_crosses),
                                                     rep(generation, n_crosses),
                                                     rep(generation, n_crosses)),
-                                     BV = c(gv_pop@gv, pheno_pop@gv, rand_pop@gv, ebv_pop@gv),
-                        Phenotype = c(gv_pop@pheno, pheno_pop@pheno, rand_pop@pheno, ebv_pop@gv)
+                                     BV = c(gv_pop@gv, rand_pop@gv, ebv_pop@gv),
+                        Phenotype = c(gv_pop@pheno, rand_pop@pheno, ebv_pop@gv)
                                        
                         ) 
     generations = bind_rows(generations, update)
@@ -86,9 +98,25 @@ generations %>%
     ggplot(aes(generation, BV, color = population))+
     geom_smooth()
 
+
+for(generation in 1:10){
+    gv_pop = selectCross(pop=gv_pop, nFemale=150, nMale=20, use="gv", nCrosses = n_crosses) #performs breeding for genetic value selection
+    update = data.frame(animal = seq(1, n_crosses), 
+                                     population = rep("gv_pop", n_crosses),
+                                     generation = rep(generation, n_crosses),
+                                     BV = gv_pop@gv,
+                        Phenotype = gv_pop@pheno
+                        ) 
+    generations = bind_rows(generations, update)
+    }
+
 ```
 
 ## Selecting bulls with EBVs, females via phenotypic selection
+* Can we assume that these are coming from two vastly different populations each generation? 
+* Does it make sense to have two populations of concurrent selection going on
+* Bulls coming from seedstock setting with more strict selection pressure on them. 
+
 ```{r}
 pop = newPop(founderPop)
 
@@ -96,9 +124,203 @@ ans = RRBLUP(pop, simParam=SP)
 pop = setEBV(pop, ans, simParam=SP)
 
 females = selectInd(pop = pop, nInd = 150, sex = "F", use = "pheno")
-males = selectInd(pop, nInd = 150)
+males = selectInd(pop, nInd = 20, sex = "M", use = "ebv")
 
 makeCross()
 
+gv_pop@gv
+```
+
+```{r}
+founderPop = quickHaplo(nInd=100, nChr=10, segSites=1000)
+# Setting Simulation Parameters
+SP = SimParam$new(founderPop)
+SP$setSexes("yes_sys")
+SP$addTraitA(nQtlPerChr=100)
+SP$setVarE(h2=.5)
+SP$addSnpChip(10)
+# Modeling the Breeding Program
+gv_pop = pheno_pop = random_pop = ebv_pop = newPop(founderPop)
+ans = RRBLUP(ebv_pop, simParam = SP)
+ebv_pop = setEBV(ebv_pop, ans, simParam = SP)
+generations = data.frame(animal = NULL, population = NULL, generation = NULL, BV = NULL, sex = NULL)
+for(generation in 1:10){
+  gv_pop = selectCross(pop=gv_pop, nFemale=45, nMale=5, use="gv", nCrosses = 100)
+  pheno_pop = selectCross(pop=pheno_pop, nFemale=45, nMale=5, use="pheno", nCrosses = 100)
+  random_pop = selectCross(pop=random_pop, nFemale = 45, nMale = 5, use= "rand", nCrosses = 100)
+  ebv_pop = selectCross(pop=ebv_pop, nFemale = 45, nMale = 5, use = "ebv", nCrosses = 100)
+  update = data.frame(animal = seq(1, 100),
+                      generation = rep(generation, nCrosses = 100),
+                      GV = gv_pop@gv,
+                      Phenotype = pheno_pop@gv,
+                      Random = random_pop@gv,
+                      EBV = ebv_pop@gv)
+  generations = bind_rows(generations, update)
+}
+#record the gv, phenotype, and random in a dataframe, set up an empty dataframe.
+#Use @ symbol to pull out certain things
+#Graphing all together
+ggplot(data = generations, aes(x = generation, y = animal)) + ylab(“Genetic Value”) +
+  geom_smooth(aes(y = GV), color = “blue”) +
+  geom_smooth(aes(y = Phenotype), color = “green”) +
+  geom_smooth(aes(y = Random), color = “red”) +
+  geom_smooth(aes(y = EBV), color = “orange”)
+#1st graph is geom_line, 2nd is geom_point, 3rd is geom_smooth
+#geom_smooth is the best line graph, geom_line is super weird and awkward looking
+```
+
+
+###Understanding how to simulate "accuracy"
+* Here we're quick-simulating 100,000 animals 
+```{r}
+founderPop = quickHaplo(nInd=100000, nChr=10, segSites=1000)
+SP = SimParam$new(founderPop)
+SP$addTraitA(nQtlPerChr=200)
+SP$setVarE(h2 = 0.25)
+population = newPop(founderPop)
+
+cor(population@gv, population@gv+rnorm(100000,0,1.5), method = "spearman")
+
+
+```
+
+##Exploring how phenotype and heritability are related
+```{r}
+pearson_corr = c()
+spearman_corr = c()
+for (xx in seq(0,1, by =0.01)){
+  founderPop = quickHaplo(nInd=100000, nChr=10, segSites=1000)
+  SP = SimParam$new(founderPop)
+  SP$addTraitA(nQtlPerChr=200)
+  SP$setVarE(h2 = xx)
+  population = newPop(founderPop)
+  pearson_corr = append(pearson_corr, cor(population@gv, population@pheno))
+  spearman_corr = append(spearman_corr, cor(population@gv, population@pheno, method = "spearman"))
+  }
+```
+
+Seeing how adding random noise to genetic values influences correlations between true and "estimated" breeding value
+```{r}
+founderPop = quickHaplo(nInd=100000, nChr=10, segSites=1000)
+SP = SimParam$new(founderPop)
+SP$addTraitA(nQtlPerChr=200)
+population = newPop(founderPop)
+correlations = data.frame(standard_dev=NULL, correlation=NULL)
+
+for (xx in seq(0,10, by = 0.1)){
+  update = data.frame(standard_dev = xx, correlation = cor(population@gv, population@gv+rnorm(100000,0,xx), method = "spearman"))
+  correlations = bind_rows(correlations, update)
+}
+correlations %>% 
+  rename(correlation = Trait1) %>% 
+  dplyr::mutate(reliability = correlation^2,
+         BIF = r_to_bif(correlation)) %>% 
+  pivot_longer(!standard_dev, names_to = "Measure", values_to = "Accuracy") %>% 
+  ggplot(aes(Accuracy, standard_dev, color = Measure))+
+  geom_smooth()
+```
+
+
+
+```{r}
+data.frame(h2 = seq(0,1, by =0.01), spearman_corr, pearson_corr) %>% 
+  pivot_longer(!h2, names_to = "corr_type", values_to = "correlation") %>% 
+  ggplot(aes(h2, correlation, color = corr_type))+
+  geom_point()
+```
+
+
+#Heifer selection
+
+###Creating founder population and setting simulation parameters
+```{r}
+founderPop = quickHaplo(nInd=10000, nChr=10, segSites=1000)
+SP = SimParam$new(founderPop)
+SP$addTraitA(nQtlPerChr=200)
+SP$setSexes("yes_sys")
+SP$addSnpChip(nSnpPerChr = 100)
+SP$setVarE(h2 = 0.3)
+
+
+```
+### Burn-in simulations and early genetic progress
+```{r}
+commercial = seedstock = newPop(founderPop)
+generations = data.frame(animal = NULL, population = NULL, generation = NULL, BV = NULL, sex = NULL)
+rand_ncrosses = 1000
+ncrosses = 500
+
+for(generation in -40:-21){
+    seedstock = randCross(pop=seedstock, nCrosses = rand_ncrosses)
+    commercial = randCross(pop=commercial, nCrosses = rand_ncrosses) #performs breeding for genetic value selection
+    update = data.frame(animal = seq(1, seedstock@nInd+commercial@nInd), 
+                                     population = c(rep("seedstock", seedstock@nInd),
+                                                    rep("commercial", commercial@nInd)), 
+                                     generation = rep(generation, seedstock@nInd + commercial@nInd),
+                                     BV = c(seedstock@gv, commercial@gv),
+                        Phenotype = c(seedstock@pheno, commercial@pheno)
+                        ) 
+    generations = bind_rows(generations, update)
+}
+
+for(generation in -21:-1){
+    seedstock@gv <- seedstock@gv+rnorm(seedstock@nInd,0,0.5)
+    commercial@gv <- commercial@gv+rnorm(commercial@nInd,0,1.5)
+    seedstock = selectCross(pop=seedstock, nFemale = 150, nMale = 150, use = "gv", nCrosses = ncrosses)
+    commercial = selectCross(pop=commercial, nFemale = 150, nMale = 150, use = "gv", nCrosses = ncrosses) #performs breeding for genetic value selection
+    update = data.frame(animal = seq(1, seedstock@nInd+commercial@nInd), 
+                                     population = c(rep("seedstock", seedstock@nInd),
+                                                    rep("commercial", commercial@nInd)), 
+                                     generation = rep(generation, seedstock@nInd + commercial@nInd),
+                                     BV = c(seedstock@gv, commercial@gv),
+                        Phenotype = c(seedstock@pheno, commercial@pheno)
+                        ) 
+    generations = bind_rows(generations, update)
+}
+
+```
+
+Genetic progress of commercial vs seedstock over burn-in phase
+```{r}
+generations %>% 
+  ggplot(aes(x = generation, y = BV, color = population))+
+  geom_smooth()
+```
+## Simulating commercial genomics
+Non-overlapping generations (Each female is crossed 5 times)
+```{r}
+commercial = seedstock = newPop(founderPop)
+
+generations = data.frame(animal = NULL, population = NULL, generation = NULL, BV = NULL, sex = NULL)
+
+rand_ncrosses = 1000
+ncrosses = 500
+
+commercial_pheno = commercial
+commercial_genomic = commercial
+for (generation in 0:20){
+  seedstock@gv <- seedstock@gv+rnorm(seedstock@nInd,0,0.5)
+  commercial_pheno@gv <- commercial@gv+rnorm(commercial@nInd,0,1.5)
+  commercial_genomic@gv <- commercial@gv+rnorm(commercial@nInd,0,0.5)
+  
+  seedstock = selectCross(pop = seedstock, nFemale = 1000, nMale = 50, use = "gv", nCrosses = 5000)
+  
+  bulls = selectInd(seedstock, nInd = 250, use = "gv", sex = "M")
+  heifers_genomic = selectInd(commercial, nInd = 1000, use = "gv", sex = "F")
+  heifers_pheno = selectInd(commercial, nInd = 1000, use = "gv", sex = "F")
+  
+  commercial_pheno = randCross2(females = heifers_pheno, males = bulls, nProgeny = 5, balance = TRUE, nCrosses = 5000)
+  commercial_genomic = randCross2(females = heifers_genomic, males = bulls, nProgeny = 5, balance = TRUE, nCrosses = 5000)
+  
+  update = data.frame(animal = seq(1, seedstock@nInd+commercial_pheno@nInd, commercial_genomic@nInd), 
+                                     population = c(rep("seedstock", seedstock@nInd),
+                                                    rep("commercial_phenotypic", commercial_pheno@nInd), rep("commercial_genomic", commercial_genomic@nInd)), 
+                                     generation = rep(generation, seedstock@nInd + commercial_pheno@nInd + commercial_genomic@nInd),
+                                     BV = c(seedstock@gv, commercial_pheno@gv, commercial_genomic@gv),
+                        Phenotype = c(seedstock@pheno, commercial_pheno@pheno, commercial_genomic@pheno)
+                        )
+  
+  generations = bind_rows(generations, update)
+}
 ```
 
